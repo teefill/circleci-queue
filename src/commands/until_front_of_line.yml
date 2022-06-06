@@ -32,6 +32,18 @@ parameters:
     type: env_var_name
     default: CIRCLECI_API_KEY
     description: "In case you use a different Environment Variable Name than CIRCLECI_API_KEY, supply it here."
+  circleci-base-url:
+    type: string
+    default: "circleci.com"
+    description: "For CircleCI Server installations running under a custom domain, override this value."
+  https-proxy:
+    type: string
+    default: ""
+    description: "If a proxy is needed to reach the CircleCI API, provide the url here."
+  no-proxy:
+    type: string
+    default: ""
+    description: "When using a proxy, you can specify a comma-separated list of domains here to skip going through the proxy."
   tag-pattern:
     type: string
     default: ""
@@ -55,7 +67,7 @@ steps:
           echo "DEBUG: Making API Call to ${1}"
           url=$1
           target=$2
-          http_response=$(curl -f -s -X GET -H "Circle-Token:${<< parameters.circleci-api-key >>}" -o "${target}" -w "%{http_code}" "${url}")
+          http_response=$(curl -f -s -x "<<parameters.https-proxy>>" --noproxy "<<parameters.no-proxy>>" -X GET -H "Circle-Token:${<< parameters.circleci-api-key >>}" -o "${target}" -w "%{http_code}" "${url}")
           if [ $http_response != "200" ]; then
               echo "ERROR: Server returned error code: $http_response"
               cat ${target}
@@ -76,7 +88,7 @@ steps:
           if [ -z "${<< parameters.circleci-api-key >>}" ]; then
             echo "<< parameters.circleci-api-key >> not set. Private projects will be inaccessible."
           else
-            fetch "https://circleci.com/api/v2/me" "/tmp/me.cci"
+            fetch "https://<<parameters.circleci-base-url>>/api/v2/me" "/tmp/me.cci"
             me=$(jq -e '.id' /tmp/me.cci)
             echo "Using API key for user: ${me}"
           fi
@@ -87,15 +99,15 @@ steps:
         fetch_filtered_active_builds(){
           if [ "<<parameters.consider-branch>>" != "true" ];then
             echo "Orb parameter 'consider-branch' is false, will block previous builds on any branch." 
-            jobs_api_url_template="https://circleci.com/api/v1.1/project/${VCS_TYPE}/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}?filter=running"
+            jobs_api_url_template="https://<<parameters.circleci-base-url>>/api/v1.1/project/${VCS_TYPE}/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}?filter=running"
           elif [ -n "${CIRCLE_TAG:x}" ] && [ "$tag_pattern" != "" ]; then
             # I'm not sure why this is here, seems identical to above?
             echo "CIRCLE_TAG and orb parameter tag-pattern is set, fetch active builds"
-            jobs_api_url_template="https://circleci.com/api/v1.1/project/${VCS_TYPE}/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}?filter=running"
+            jobs_api_url_template="https://<<parameters.circleci-base-url>>/api/v1.1/project/${VCS_TYPE}/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}?filter=running"
           else
             : ${CIRCLE_BRANCH:?"Required Env Variable not found!"}
             echo "Only blocking execution if running previous jobs on branch: ${CIRCLE_BRANCH}"
-            jobs_api_url_template="https://circleci.com/api/v1.1/project/${VCS_TYPE}/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/tree/${CIRCLE_BRANCH}?filter=running"
+            jobs_api_url_template="https://<<parameters.circleci-base-url>>/api/v1.1/project/${VCS_TYPE}/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/tree/${CIRCLE_BRANCH}?filter=running"
           fi
 
           if [ ! -z $TESTING_MOCK_RESPONSE ] && [ -f $TESTING_MOCK_RESPONSE ];then
@@ -122,7 +134,7 @@ steps:
               echo "Using test mock workflow response"
               cat $TESTING_MOCK_WORKFLOW_RESPONSES/${workflow}.json > ${workflow_file}
             else
-              fetch "https://circleci.com/api/v2/workflow/${workflow}" "${workflow_file}"
+              fetch "https://<<parameters.circleci-base-url>>/api/v2/workflow/${workflow}" "${workflow_file}"
             fi
             created_at=`jq -r '.created_at' ${workflow_file}`
             echo "Workflow was created at: ${created_at}"
@@ -180,8 +192,8 @@ steps:
 
         cancel_current_build(){
           echo "Cancelleing build ${CIRCLE_BUILD_NUM}"
-          cancel_api_url_template="https://circleci.com/api/v1.1/project/${VCS_TYPE}/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/${CIRCLE_BUILD_NUM}/cancel?circle-token=${<< parameters.circleci-api-key >>}"
-          curl -s -X POST $cancel_api_url_template > /dev/null
+          cancel_api_url_template="https://<<parameters.circleci-base-url>>/api/v1.1/project/${VCS_TYPE}/${CIRCLE_PROJECT_USERNAME}/${CIRCLE_PROJECT_REPONAME}/${CIRCLE_BUILD_NUM}/cancel?circle-token=${<< parameters.circleci-api-key >>}"
+          curl -s -x "<<parameters.https-proxy>>" --noproxy "<<parameters.no-proxy>>" -X POST $cancel_api_url_template > /dev/null
         }
 
 
